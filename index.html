@@ -194,11 +194,20 @@ async function saveResult(){
   document.getElementById("memo").value = "";
 }
 
-function startQR(){
+async function startQR(){
   setMsg("カメラ起動中...");
 
+  const reader = document.getElementById("reader");
+  reader.innerHTML = "";
+
   if(qrScanner){
-    qrScanner.clear().catch(() => {});
+    try{
+      await qrScanner.stop();
+    }catch(e){}
+    try{
+      await qrScanner.clear();
+    }catch(e){}
+    qrScanner = null;
   }
 
   qrScanner = new Html5Qrcode("reader");
@@ -209,17 +218,20 @@ function startQR(){
       fps: 10,
       qrbox: 250
     },
-    decodedText => {
+    async decodedText => {
       document.getElementById("code").value = decodedText;
 
-      qrScanner.stop()
-        .then(() => {
-          document.getElementById("reader").innerHTML = "";
-          searchItem();
-        })
-        .catch(() => {
-          searchItem();
-        });
+      try{
+        await qrScanner.stop();
+      }catch(e){}
+      try{
+        await qrScanner.clear();
+      }catch(e){}
+
+      qrScanner = null;
+      reader.innerHTML = "";
+
+      searchItem();
     },
     errorMessage => {}
   ).catch(err => {
