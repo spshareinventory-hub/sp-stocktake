@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SP在庫管理</title>
+
+<style>
+body{
+    font-family: sans-serif;
+    max-width:900px;
+    margin:auto;
+    padding:20px;
+}
+
+input,button{
+    padding:10px;
+    margin:5px;
+}
+
+.card{
+    border:1px solid #ccc;
+    border-radius:10px;
+    padding:15px;
+    margin-top:10px;
+}
+
+img{
+    max-width:300px;
+    margin-top:10px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>SP在庫管理</h1>
+
+<input type="text" id="searchCode" placeholder="管理番号">
+
+<button onclick="searchItem()">
+検索
+</button>
+
+<div id="result"></div>
+
+<script>
+
+async function searchItem(){
+
+    const code =
+    document.getElementById("searchCode").value;
+
+    document.getElementById("result").innerHTML =
+    "検索中...";
+
+}
+
+</script>
+
+</body>
+</html>
