@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SP在庫管理 管理者アップロード</title>
+  <style>
+    body{font-family:system-ui,-apple-system,"Meiryo",sans-serif;background:#f4f7fb;margin:0;color:#172033}
+    main{max-width:980px;margin:24px auto;padding:20px;background:white;border-radius:14px;box-shadow:0 8px 24px rgba(15,23,42,.08)}
+    h1{margin:0 0 12px;font-size:26px}.card{border:1px solid #dce3ee;border-radius:12px;padding:14px;margin:14px 0;background:#fbfdff}
+    label{display:block;font-weight:700;margin-bottom:8px}input{font-size:15px}button{font-size:17px;font-weight:700;padding:12px 18px;border-radius:10px;border:1px solid #9fb3c8;background:#dff5df;cursor:pointer}
+    button:disabled{opacity:.5;cursor:not-allowed}pre{height:300px;overflow:auto;background:#0f172a;color:#e5e7eb;padding:12px;border-radius:10px;white-space:pre-wrap}.muted{color:#64748b}.ok{color:#0f7a34}.ng{color:#b42318}
+  </style>
+</head>
+<body>
+<main>
+  <h1>SP在庫管理 管理者アップロード</h1>
+  <p class="muted">PCアプリで出力した <b>cloud_master.json</b> と <b>photos</b> フォルダを選択して、Supabaseへ反映します。</p>
+
+  <div class="card">
+    <label>1. cloud_master.json を選択</label>
+    <input id="jsonFile" type="file" accept=".json,application/json" />
+    <div id="jsonInfo" class="muted"></div>
+  </div>
+
+  <div class="card">
+    <label>2. photos フォルダを選択</label>
+    <input id="photoFiles" type="file" webkitdirectory directory multiple accept="image/*" />
+    <div id="photoInfo" class="muted"></div>
+  </div>
+
+  <div class="card">
+    <button id="uploadBtn" disabled>Supabaseへ反映</button>
+  </div>
+
+  <pre id="log">待機中...</pre>
+</main>
+<script>
+const SUPABASE_URL = "https://aqoekjxffnxglplihahd.supabase.co";
+const SUPABASE_KEY = "sb_publishable_me-K-qKQrbrk8yloC6vMQw_BL0uato-";
+const ITEMS_TABLE = "items";
+const PHOTO_BUCKET = "photos";
+
+let master = null;
+let photoMap = new Map();
+const jsonFile = document.getElementById('jsonFile');
+const photoFiles = document.getElementById('photoFiles');
+const uploadBtn = document.getElementById('uploadBtn');
+const logEl = document.getElementById('log');
+const jsonInfo = document.getElementById('jsonInfo');
+const photoInfo = document.getElementById('photoInfo');
+
+function log(msg, cls){
+  if(logEl.textContent === '待機中...') logEl.textContent = '';
+  logEl.textContent += msg + "\n";
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function headers(contentType='application/json'){
+  const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` };
+  if(contentType) h['Content-Type'] = contentType;
+  return h;
+}
+function updateReady(){
+  uploadBtn.disabled = !(master && Array.isArray(master.items));
+}
+
+jsonFile.addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if(!file) return;
+  try{
+    master = JSON.parse(await file.text());
+    jsonInfo.textContent = `読込OK: ${master.items?.length ?? 0}件`;
+    log(`JSON読込OK: ${file.name}`);
+  }catch(err){
+    master = null;
+    jsonInfo.textContent = 'JSON読込NG: ' + err.message;
+    log('JSON読込NG: ' + err.message);
+  }
+  updateReady();
+});
+
+photoFiles.addEventListener('change', e => {
+  photoMap.clear();
+  for(const file of e.target.files){
+    photoMap.set(file.name, file);
+  }
+  photoInfo.textContent = `写真読込: ${photoMap.size}件`;
+  log(`写真フォルダ読込: ${photoMap.size}件`);
+});
+
+async function requestJson(url, options){
+  const res = await fetch(url, options);
+  const text = await res.text();
+  if(!res.ok) throw new Error(`${res.status} ${text}`);
+  return text ? JSON.parse(text) : null;
+}
+
+async function upsertItem(item){
+  const q = new URLSearchParams({ select:'id', code:`eq.${item.code}` });
+  const found = await requestJson(`${SUPABASE_URL}/rest/v1/${ITEMS_TABLE}?${q}`, { headers: headers() });
+  if(found && found.length){
+    const patchQ = new URLSearchParams({ code:`eq.${item.code}` });
+    await requestJson(`${SUPABASE_URL}/rest/v1/${ITEMS_TABLE}?${patchQ}`, {
+      method:'PATCH', headers:{...headers(), Prefer:'return=minimal'}, body:JSON.stringify(item)
+    });
+    return 'update';
+  }
+  await requestJson(`${SUPABASE_URL}/rest/v1/${ITEMS_TABLE}`, {
+    method:'POST', headers:{...headers(), Prefer:'return=minimal'}, body:JSON.stringify(item)
+  });
+  return 'insert';
+}
+
+async function uploadPhoto(filename){
+  const file = photoMap.get(filename);
+  if(!file) return 'none';
+  const safeName = encodeURIComponent(filename);
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${PHOTO_BUCKET}/${safeName}`, {
+    method:'POST', headers:{...headers(file.type || 'application/octet-stream'), 'x-upsert':'true'}, body:file
+  });
+  const text = await res.text();
+  if(!res.ok) throw new Error(`${res.status} ${text}`);
+  return 'uploaded';
+}
+
+uploadBtn.addEventListener('click', async () => {
+  uploadBtn.disabled = true;
+  logEl.textContent = '';
+  let itemOk=0,itemNg=0,photoOk=0,photoNg=0;
+  log('Supabase反映開始...');
+  for(const item of master.items){
+    try{
+      const mode = await upsertItem(item);
+      itemOk++;
+      log(`[OK] item ${item.code} (${mode})`);
+      if(item.photo_path){
+        try{
+          const r = await uploadPhoto(item.photo_path);
+          if(r === 'uploaded'){ photoOk++; log(`     photo OK: ${item.photo_path}`); }
+          else log(`     photoなし: ${item.photo_path}`);
+        }catch(err){ photoNg++; log(`     photo NG: ${err.message}`); }
+      }
+    }catch(err){
+      itemNg++;
+      log(`[NG] item ${item.code}: ${err.message}`);
+    }
+  }
+  log('');
+  log(`完了: マスタOK ${itemOk}件 / マスタNG ${itemNg}件 / 写真OK ${photoOk}件 / 写真NG ${photoNg}件`);
+  uploadBtn.disabled = false;
+});
+</script>
+</body>
+</html>
