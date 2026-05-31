@@ -3,60 +3,121 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SP在庫管理</title>
-
+<title>SPスマホ棚卸</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-body{
-    font-family: sans-serif;
-    max-width:900px;
-    margin:auto;
-    padding:20px;
-}
-
-input,button{
-    padding:10px;
-    margin:5px;
-}
-
-.card{
-    border:1px solid #ccc;
-    border-radius:10px;
-    padding:15px;
-    margin-top:10px;
-}
-
-img{
-    max-width:300px;
-    margin-top:10px;
-}
+body{font-family:sans-serif;background:#f3f6fb;margin:0;padding:16px;}
+.wrap{max-width:520px;margin:auto;}
+h1{font-size:28px;}
+.card{background:white;border-radius:16px;padding:16px;margin:14px 0;box-shadow:0 2px 8px #0001;}
+input,textarea,button{width:100%;box-sizing:border-box;font-size:20px;padding:14px;margin-top:8px;border-radius:10px;border:1px solid #ccc;}
+button{background:#1976d2;color:white;font-weight:bold;border:none;}
+img{width:100%;max-height:320px;object-fit:contain;background:#eee;border-radius:12px;margin-top:12px;}
+.small{color:#666;font-size:14px;}
+.hidden{display:none;}
 </style>
 </head>
-
 <body>
+<div class="wrap">
+<h1>SPスマホ棚卸</h1>
 
-<h1>SP在庫管理</h1>
+<div class="card">
+  <div class="small">QRが読めない場合は管理番号を直接入力</div>
+  <input id="code" placeholder="例：FF-001">
+  <button onclick="searchItem()">検索</button>
+</div>
 
-<input type="text" id="searchCode" placeholder="管理番号">
+<div id="itemBox" class="card hidden">
+  <h2 id="itemName"></h2>
+  <div id="itemInfo"></div>
+  <img id="itemPhoto">
+</div>
 
-<button onclick="searchItem()">
-検索
-</button>
+<div class="card">
+  <label>実棚数</label>
+  <input id="actualQty" type="number" placeholder="数量を入力">
+  <label>担当者</label>
+  <input id="person" value="スマホ棚卸">
+  <label>メモ</label>
+  <textarea id="memo" placeholder="任意"></textarea>
+  <button onclick="saveResult()">棚卸登録</button>
+</div>
 
-<div id="result"></div>
+<div id="msg" class="card small">管理番号を検索してください。</div>
+</div>
 
 <script>
+const SUPABASE_URL = "https://aqoekjxffnxglplihahd.supabase.co";
+const SUPABASE_KEY = "sb_publishable_me-K-qKQrbrk8yloC6vMQw_BL0uato-";
+const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let currentItem = null;
 
 async function searchItem(){
+  const code = document.getElementById("code").value.trim();
+  if(!code){ setMsg("管理番号を入力してください。"); return; }
 
-    const code =
-    document.getElementById("searchCode").value;
+  setMsg("検索中...");
+  const { data, error } = await client
+    .from("items")
+    .select("*")
+    .eq("code", code)
+    .single();
 
-    document.getElementById("result").innerHTML =
-    "検索中...";
+  if(error || !data){
+    currentItem = null;
+    document.getElementById("itemBox").classList.add("hidden");
+    setMsg("該当データがありません。");
+    return;
+  }
 
+  currentItem = data;
+  document.getElementById("itemName").textContent = data.name || "";
+  document.getElementById("itemInfo").innerHTML =
+    "管理番号：" + data.code + "<br>" +
+    "分類：" + (data.category || "") + "<br>" +
+    "保管場所：" + (data.location || "");
+
+  const { data: urlData } = client.storage
+    .from("photos")
+    .getPublicUrl(data.photo_path);
+
+  document.getElementById("itemPhoto").src = urlData.publicUrl;
+  document.getElementById("itemBox").classList.remove("hidden");
+  setMsg("対象を確認して実棚数を入力してください。");
 }
 
-</script>
+async function saveResult(){
+  if(!currentItem){ setMsg("先に管理番号を検索してください。"); return; }
 
+  const actualQty = document.getElementById("actualQty").value;
+  const person = document.getElementById("person").value.trim();
+  const memo = document.getElementById("memo").value.trim();
+
+  if(actualQty === ""){ setMsg("実棚数を入力してください。"); return; }
+
+  setMsg("登録中...");
+  const { error } = await client.from("stocktake_results").insert({
+    code: currentItem.code,
+    name: currentItem.name,
+    actual_qty: Number(actualQty),
+    person: person || "スマホ棚卸",
+    memo: memo
+  });
+
+  if(error){
+    setMsg("登録失敗：" + error.message);
+    return;
+  }
+
+  setMsg("棚卸登録しました！");
+  document.getElementById("actualQty").value = "";
+  document.getElementById("memo").value = "";
+}
+
+function setMsg(text){
+  document.getElementById("msg").textContent = text;
+}
+</script>
 </body>
 </html>
