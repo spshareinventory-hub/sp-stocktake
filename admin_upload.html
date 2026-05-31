@@ -15,10 +15,10 @@
 <body>
 <main>
   <h1>SP在庫管理 管理者アップロード</h1>
-  <p class="muted">PCアプリで出力した <b>cloud_master.json</b> と <b>photos</b> フォルダを選択して、Supabaseへ反映します。</p>
+  <p class="muted">PCアプリで出力したマスタファイルと写真フォルダを選択して、クラウドへ反映します。棚卸後は、この画面から棚卸結果をダウンロードできます。</p>
 
   <div class="card">
-    <label>1. cloud_master.json を選択</label>
+    <label>1. マスタファイルを選択</label>
     <input id="jsonFile" type="file" accept=".json,application/json" />
     <div id="jsonInfo" class="muted"></div>
   </div>
@@ -30,7 +30,8 @@
   </div>
 
   <div class="card">
-    <button id="uploadBtn" disabled>Supabaseへ反映</button>
+    <button id="uploadBtn" disabled>クラウドへ反映</button>
+    <button id="downloadBtn" type="button" style="margin-left:8px;background:#eaf4ff">棚卸結果ダウンロード</button>
   </div>
 
   <pre id="log">待機中...</pre>
@@ -40,12 +41,14 @@ const SUPABASE_URL = "https://aqoekjxffnxglplihahd.supabase.co";
 const SUPABASE_KEY = "sb_publishable_me-K-qKQrbrk8yloC6vMQw_BL0uato-";
 const ITEMS_TABLE = "items";
 const PHOTO_BUCKET = "photos";
+const STOCKTAKE_TABLE = "stocktake_results";
 
 let master = null;
 let photoMap = new Map();
 const jsonFile = document.getElementById('jsonFile');
 const photoFiles = document.getElementById('photoFiles');
 const uploadBtn = document.getElementById('uploadBtn');
+const downloadBtn = document.getElementById('downloadBtn');
 const logEl = document.getElementById('log');
 const jsonInfo = document.getElementById('jsonInfo');
 const photoInfo = document.getElementById('photoInfo');
@@ -70,11 +73,11 @@ jsonFile.addEventListener('change', async e => {
   try{
     master = JSON.parse(await file.text());
     jsonInfo.textContent = `読込OK: ${master.items?.length ?? 0}件`;
-    log(`JSON読込OK: ${file.name}`);
+    log(`マスタ読込OK: ${file.name}`);
   }catch(err){
     master = null;
-    jsonInfo.textContent = 'JSON読込NG: ' + err.message;
-    log('JSON読込NG: ' + err.message);
+    jsonInfo.textContent = 'マスタ読込NG: ' + err.message;
+    log('マスタ読込NG: ' + err.message);
   }
   updateReady();
 });
@@ -123,11 +126,57 @@ async function uploadPhoto(filename){
   return 'uploaded';
 }
 
+
+function makeDownloadName(){
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return `棚卸結果_${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.dat`;
+}
+
+function saveTextFile(filename, text){
+  const blob = new Blob([text], {type:'application/octet-stream'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadStocktakeResults(){
+  downloadBtn.disabled = true;
+  if(logEl.textContent === '待機中...') logEl.textContent = '';
+  log('棚卸結果取得開始...');
+  try{
+    const q = new URLSearchParams({select:'*', order:'created_at.desc', limit:'1000'});
+    const rows = await requestJson(`${SUPABASE_URL}/rest/v1/${STOCKTAKE_TABLE}?${q}`, { headers: headers() });
+    const data = {
+      app: 'SP在庫管理',
+      kind: 'stocktake_results',
+      exported_at: new Date().toISOString(),
+      count: rows.length,
+      results: rows
+    };
+    const filename = makeDownloadName();
+    saveTextFile(filename, JSON.stringify(data, null, 2));
+    log(`[OK] 棚卸結果ダウンロード: ${rows.length}件 / ${filename}`);
+  }catch(err){
+    log(`[NG] 棚卸結果ダウンロード: ${err.message}`);
+    alert('棚卸結果のダウンロードに失敗しました。\n' + err.message);
+  }finally{
+    downloadBtn.disabled = false;
+  }
+}
+
+downloadBtn.addEventListener('click', downloadStocktakeResults);
+
 uploadBtn.addEventListener('click', async () => {
   uploadBtn.disabled = true;
   logEl.textContent = '';
   let itemOk=0,itemNg=0,photoOk=0,photoNg=0;
-  log('Supabase反映開始...');
+  log('クラウド反映開始...');
   for(const item of master.items){
     try{
       const mode = await upsertItem(item);
